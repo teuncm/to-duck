@@ -1,0 +1,19 @@
+{
+  "name": "To-ducks",
+  "short_name": "To-ducks",
+  "description": "A small list of to-ducks. Finish one and a duck floats into view.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0e0e0e",
+  "theme_color": "#0e0e0e",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

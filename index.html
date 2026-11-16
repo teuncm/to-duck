@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="description" content="To-ducks: a small list of to-ducks. Finish one and a duck floats into view.">
+  <meta name="theme-color" content="#0e0e0e">
+  <meta name="color-scheme" content="dark light">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="To-ducks">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icon.svg">
+  <meta property="og:title" content="To-ducks">
+  <meta property="og:description" content="To-ducks: a small list of to-ducks. Finish one and a duck floats into view.">
+  <meta property="og:type" content="website">
+  <title>To-ducks</title>
+</head>
+<body>
+  <header class="bar">
+    <h1 class="title">To-ducks</h1>
+    <div class="actions">
+      <button id="archive-toggle" type="button" class="icon" aria-pressed="false" aria-label="Show Quacked" title="Quacked">
+        <i data-lucide="archive" aria-hidden="true"></i>
+      </button>
+      <div class="menu">
+        <button id="settings" type="button" class="icon" aria-expanded="false" aria-controls="settings-panel" aria-label="Settings" title="Settings">
+          <i data-lucide="settings" aria-hidden="true"></i>
+        </button>
+        <div id="settings-panel" class="panel" role="group" aria-label="Settings" hidden>
+          <button id="import-open" type="button" class="panel-action">Import</button>
+          <button id="export-open" type="button" class="panel-action">Export</button>
+          <div class="panel-rule" role="separator"></div>
+          <button id="clear-all" type="button" class="panel-action">Clear All</button>
+          <button id="clear-todos" type="button" class="panel-action">Clear To-ducks</button>
+          <button id="clear-archive" type="button" class="panel-action">Clear Quacked</button>
+          <div class="panel-rule" role="separator"></div>
+          <button id="respawn-ducks" type="button" class="panel-action">Reflow ducks</button>
+          <button id="shuffle-todos" type="button" class="panel-action" disabled>Shuffle to-ducks</button>
+          <button id="zen-toggle" type="button" class="panel-action" aria-pressed="false">Zen mode</button>
+          <div class="panel-rule" role="separator"></div>
+          <button id="help-open" type="button" class="panel-action">Keyboard shortcuts</button>
+        </div>
+      </div>
+      <button id="theme" type="button" class="icon" aria-label="Switch to light mode">
+        <i data-lucide="sun" class="sun" aria-hidden="true"></i>
+        <i data-lucide="moon" class="moon" aria-hidden="true"></i>
+      </button>
+    </div>
+  </header>
+
+  <div class="stage">
+    <div class="todos">
+    <form id="composer" class="composer" autocomplete="off">
+      <label class="sr" for="draft">Add to-duck</label>
+      <input id="draft" type="text" placeholder="Add..." maxlength="240" spellcheck="false">
+      <button id="enter-add" type="submit" class="hint" aria-label="Add to-duck">add <span aria-hidden="true">↵</span></button>
+    </form>
+
+    <div class="list-box">
+    <main>
+      <ul id="list" class="list" aria-label="To-ducks"></ul>
+      <p id="empty" class="sr" role="status" hidden>A little task. A little duck.<span>Add something above to begin.</span></p>
+      <section id="archive" class="archive" aria-label="Quacked" hidden>
+        <p id="archive-empty" class="sr" role="status" hidden>Nothing Quacked yet.</p>
+        <ul id="archive-list" class="list muted" aria-label="Quacked to-ducks"></ul>
+      </section>
+    </main>
+    </div>
+    </div>
+    <div id="jar" role="img" aria-label="Ducks"></div>
+  </div>
+  <p id="announcement" class="sr" role="status" aria-live="polite" aria-atomic="true"></p>
+
+  <div id="zen" class="zen" hidden>
+    <div class="zen-item">
+      <button id="zen-tick" type="button" class="tick" aria-label="Complete">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.2 8.2 6.4 11.4 12.8 4.6"/></svg>
+      </button>
+      <p id="zen-task"></p>
+    </div>
+  </div>
+
+  <dialog id="help" class="transfer" aria-labelledby="help-title">
+    <h2 id="help-title">Keyboard shortcuts</h2>
+    <dl class="help">
+      <div><dt>Enter</dt><dd>Add a to-duck</dd></div>
+      <div><dt>Down</dt><dd>Add box, then each to-duck. After the last to-duck, clear the selection</dd></div>
+      <div><dt>Up</dt><dd>Previous to-duck, then the add box. From the add box, clear the selection</dd></div>
+      <div><dt>Left</dt><dd>From Enter, type in the add box. On a to-duck, focus its checkbox</dd></div>
+      <div><dt>Right</dt><dd>From the add box, focus Enter. On a to-duck, focus delete</dd></div>
+      <div><dt>Enter or Space</dt><dd>Complete the selected to-duck</dd></div>
+      <div><dt>C</dt><dd>Complete the top to-duck</dd></div>
+      <div><dt>D</dt><dd>Delete the selected to-duck. Unavailable in zen mode</dd></div>
+      <div><dt>Ctrl+E</dt><dd>Export</dd></div>
+      <div><dt>Ctrl+I</dt><dd>Import</dd></div>
+      <div><dt>Ctrl+K Z</dt><dd>Toggle zen mode</dd></div>
+      <div><dt>Escape</dt><dd>Leave the add box, exit zen mode, or close settings</dd></div>
+    </dl>
+    <form method="dialog" class="transfer-actions">
+      <button type="submit">Close</button>
+    </form>
+  </dialog>
+
+  <dialog id="transfer" class="transfer" aria-labelledby="transfer-title">
+    <form method="dialog">
+      <h2 id="transfer-title">Export</h2>
+      <textarea id="transfer-text" spellcheck="false" aria-label="JSON"></textarea>
+      <p id="transfer-error" class="transfer-error" hidden></p>
+      <div class="transfer-actions">
+        <button id="transfer-download" type="button">Download</button>
+        <button id="transfer-choose" type="button">Choose file</button>
+        <button id="transfer-apply" type="button">Import</button>
+        <button type="submit">Close</button>
+      </div>
+      <input id="transfer-file" type="file" accept="application/json,.json" hidden>
+    </form>
+  </dialog>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
