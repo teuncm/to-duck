@@ -1,20 +1,27 @@
-const KEY = "todojar.v1";
-const BACKUP = "todojar.v1.bak";
+import { taskHistory, taskSequence } from "./history.js";
+import { systemTheme } from "./theme.js";
+
+const NAME = "to-duck";
+const KEY = `${NAME}.v1`;
+const BACKUP = `${KEY}.bak`;
 const CHUNK = 3200;
 const MAX_CHUNKS = 16;
 const YEAR = 60 * 60 * 24 * 365 * 10;
 
 export function loadSync() {
+  return readNamespace(NAME) || empty();
+}
+
+function readNamespace(name) {
   let stored = null;
   let backup = null;
   try {
-    stored = readJson(localStorage.getItem(KEY));
-    backup = readJson(localStorage.getItem(BACKUP));
+    stored = readJson(localStorage.getItem(`${name}.v1`));
+    backup = readJson(localStorage.getItem(`${name}.v1.bak`));
   } catch {
     // A blocked storage API should not prevent opening the app.
   }
-  const cookie = readCookie();
-  return pick(stored, backup, cookie) || empty();
+  return pick(stored, backup, readCookie(name));
 }
 
 export function saveAll(state) {
@@ -35,7 +42,7 @@ export function loadIndexedDB() {
 }
 
 function empty() {
-  return { theme: "dark", open: [], done: [], nextSlot: 0, spots: [], savedAt: 0 };
+  return { theme: systemTheme(), addPosition: "top", open: [], done: [], history: [], taskSequence: [], nextSlot: 0, spots: [], savedAt: 0 };
 }
 
 function readJson(raw) {
@@ -80,10 +87,18 @@ export function normalize(data) {
       spots.push({ x, y, angle });
     }
   }
+  const open = Array.isArray(data.open) ? data.open.map(item).filter(Boolean) : [];
+  const history = taskHistory([
+    ...(Array.isArray(data.history) ? data.history : []),
+    ...[...open, ...done].sort((a, b) => (b.at || 0) - (a.at || 0)).map((todo) => todo.text),
+  ]);
   return {
-    theme: data.theme === "light" ? "light" : "dark",
-    open: Array.isArray(data.open) ? data.open.map(item).filter(Boolean) : [],
+    theme: data.theme === "light" || data.theme === "dark" ? data.theme : systemTheme(),
+    addPosition: data.addPosition === "bottom" ? "bottom" : "top",
+    open,
     done,
+    history,
+    taskSequence: taskSequence(Array.isArray(data.taskSequence) ? data.taskSequence : [...history].reverse()),
     nextSlot: next,
     spots,
     savedAt: Number(data.savedAt) || 0,
@@ -97,7 +112,7 @@ function pick(...copies) {
   })[0] || null;
 }
 
-function readCookie() {
+function readCookie(prefix) {
   const parts = new Map();
   let count = 0;
   for (const bit of document.cookie.split("; ")) {
@@ -110,13 +125,13 @@ function readCookie() {
     } catch {
       continue;
     }
-    if (name === "todojar.n") count = Number(value) || 0;
-    else if (name.startsWith("todojar.")) parts.set(name, value);
+    if (name === `${prefix}.n`) count = Number(value) || 0;
+    else if (name.startsWith(`${prefix}.`)) parts.set(name, value);
   }
   if (!count) return null;
   let raw = "";
   for (let i = 0; i < count; i++) {
-    const part = parts.get(`todojar.${i}`);
+    const part = parts.get(`${prefix}.${i}`);
     if (part == null) return null;
     raw += part;
   }
@@ -130,18 +145,18 @@ function writeCookie(payload) {
   }
   const fits = chunks.join("").length === payload.length;
   const body = fits ? chunks : [];
-  document.cookie = `todojar.n=${body.length}; Max-Age=${fits ? YEAR : 0}; Path=/; SameSite=Lax`;
+  document.cookie = `${NAME}.n=${body.length}; Max-Age=${fits ? YEAR : 0}; Path=/; SameSite=Lax`;
   body.forEach((part, i) => {
-    document.cookie = `todojar.${i}=${encodeURIComponent(part)}; Max-Age=${YEAR}; Path=/; SameSite=Lax`;
+    document.cookie = `${NAME}.${i}=${encodeURIComponent(part)}; Max-Age=${YEAR}; Path=/; SameSite=Lax`;
   });
   for (let i = body.length; i < MAX_CHUNKS; i++) {
-    document.cookie = `todojar.${i}=; Max-Age=0; Path=/; SameSite=Lax`;
+    document.cookie = `${NAME}.${i}=; Max-Age=0; Path=/; SameSite=Lax`;
   }
 }
 
 function openDb() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open("todojar", 1);
+    const request = indexedDB.open(NAME, 1);
     request.onupgradeneeded = () => request.result.createObjectStore("state");
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);

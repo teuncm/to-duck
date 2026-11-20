@@ -1,6 +1,6 @@
 {
-  "name": "To-ducks",
-  "short_name": "To-ducks",
+  "name": "To-Duck",
+  "short_name": "To-Duck",
   "description": "A small list of to-ducks. Finish one and a duck floats into view.",
   "start_url": "./",
   "scope": "./",

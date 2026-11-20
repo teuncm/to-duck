@@ -14,6 +14,7 @@ describe("saved tasks and ducks", () => {
   it("restores tasks, theme, duck slots, and positions after saving", () => {
     const state = normalize({
       theme: "light",
+      addPosition: "bottom",
       open: [{ id: "next", text: "Go outside" }],
       done: [{ id: "done", text: "Drink water", duckSlot: 0 }],
       spots: [{ x: 20, y: 30, angle: 0.5 }],
@@ -24,15 +25,20 @@ describe("saved tasks and ducks", () => {
   });
 
   it("recovers the backup when the main saved copy is corrupt", () => {
-    localStorage.setItem("todojar.v1", "{broken");
-    localStorage.setItem("todojar.v1.bak", JSON.stringify({
+    localStorage.setItem("to-duck.v1", "{broken");
+    localStorage.setItem("to-duck.v1.bak", JSON.stringify({
       open: [{ id: "safe", text: "Still here" }], savedAt: 50,
     }));
     expect(loadSync().open[0].text).toBe("Still here");
   });
 
+  it("defaults older exports to adding at the top", () => {
+    expect(normalize({ open: [], done: [] }).addPosition).toBe("top");
+    expect(normalize({ addPosition: "invalid" }).addPosition).toBe("top");
+  });
+
   it("opens safely when local storage is blocked and a cookie is malformed", () => {
-    document.cookie = "todojar.0=%invalid; Path=/";
+    document.cookie = "to-duck.0=%invalid; Path=/";
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new DOMException("Blocked", "SecurityError");
     });

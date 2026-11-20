@@ -2,6 +2,9 @@ import "./style.css";
 import { Archive, Moon, Settings, Sun, Trash2, createIcons } from "lucide";
 import { createJar } from "./jar.js";
 import { loadIndexedDB, loadSync, normalize, saveAll } from "./store.js";
+import { suggestTasks, taskHistory, taskSequence } from "./history.js";
+import { createPredictor } from "./predictor.js";
+import { systemTheme } from "./theme.js";
 
 createIcons({
   icons: { Archive, Moon, Settings, Sun, Trash2 },
@@ -11,6 +14,18 @@ createIcons({
 const draft = document.getElementById("draft");
 const enterAdd = document.getElementById("enter-add");
 const composer = document.getElementById("composer");
+const addPosition = document.getElementById("add-position");
+const suggestions = document.getElementById("suggestions");
+let suggestionIndex = -1;
+const prediction = document.getElementById("prediction");
+const predictionPrefix = document.getElementById("prediction-prefix");
+const predictionSuffix = document.getElementById("prediction-suffix");
+const predictionContent = document.getElementById("prediction-content");
+const predictionHelp = document.getElementById("prediction-help");
+let predictor;
+let predictorHistory;
+let continuation = "";
+let composing = false;
 const list = document.getElementById("list");
 const todoBox = document.querySelector(".list-box");
 const empty = document.getElementById("empty");
@@ -26,6 +41,7 @@ const clearAllBtn = document.getElementById("clear-all");
 const clearTodosBtn = document.getElementById("clear-todos");
 const clearArchiveBtn = document.getElementById("clear-archive");
 const respawnBtn = document.getElementById("respawn-ducks");
+const rightDucksBtn = document.getElementById("right-ducks");
 const zenBtn = document.getElementById("zen-toggle");
 const zenEl = document.getElementById("zen");
 const zenTask = document.getElementById("zen-task");
@@ -46,6 +62,8 @@ const themeBtn = document.getElementById("theme");
 const jar = createJar(document.getElementById("jar"));
 
 let state = loadSync();
+// Each visit starts with the OS appearance; the theme button overrides this visit.
+state.theme = systemTheme();
 let active = -1;
 let picked = null;
 let archiveOpen = false;
@@ -90,6 +108,7 @@ function markOverflow() {
 }
 
 function render(persist = true) {
+  if (!state.done.some((todo) => todo.id === picked)) picked = null;
   if (zenOn && state.open.length) active = 0;
   list.replaceChildren(...state.open.map((todo, i) => row(todo, i)));
   empty.hidden = archiveOpen || state.open.length > 0;
@@ -97,10 +116,13 @@ function render(persist = true) {
   archiveToggle.setAttribute("aria-pressed", archiveOpen ? "true" : "false");
   archiveToggle.setAttribute("aria-label", archiveOpen ? "Show To-ducks" : "Show Quacked");
   archiveToggle.title = archiveOpen ? "To-ducks" : "Quacked";
-  document.querySelector("h1.title").textContent = archiveOpen ? "Quacked" : "To-ducks";
+  document.querySelector("h1.title").textContent = archiveOpen ? "Quacked" : "To-Duck";
   draft.disabled = archiveOpen;
   enterAdd.disabled = archiveOpen;
+  addPosition.disabled = archiveOpen;
+  syncAddPosition();
   composer.classList.toggle("disabled", archiveOpen);
+  closeSuggestions();
   if (!state.open.length && state.done.length) {
     empty.replaceChildren("All clear. Enjoy the company.");
   } else if (!state.open.length) {
@@ -116,6 +138,7 @@ function render(persist = true) {
   clearArchiveBtn.disabled = n === 0;
   shuffleBtn.disabled = state.open.length < 2;
   respawnBtn.disabled = n === 0;
+  rightDucksBtn.disabled = n === 0;
   zenBtn.disabled = state.open.length === 0;
   archiveList.replaceChildren(
     ...state.done.map((todo) => row(todo, -1, true))
@@ -125,12 +148,35 @@ function render(persist = true) {
     attrs: { width: "18", height: "18", "stroke-width": "1.75", "aria-hidden": "true" },
   });
   syncZen();
+  syncDuckHighlight();
   if (persist) save();
   requestAnimationFrame(markOverflow);
 }
 
 function flock() {
   return state.done.map((todo) => todo.duckSlot);
+}
+
+function syncDuckHighlight() {
+  const selected = archiveOpen ? state.done.find((todo) => todo.id === picked) : null;
+  jar.setHighlight(selected?.duckSlot ?? null);
+  document.getElementById("jar").setAttribute("aria-label", selected ? `Ducks. Highlighted: ${selected.text}` : "Ducks");
+}
+
+function selectQuacked(id, focus = true) {
+  focusIntent = null;
+  picked = state.done.some((todo) => todo.id === id) ? id : null;
+  for (const row of archiveList.children) {
+    const selected = row.dataset.id === picked;
+    row.classList.toggle("picked", selected);
+    if (selected) row.setAttribute("aria-current", "true");
+    else row.removeAttribute("aria-current");
+    if (selected && focus) {
+      row.focus();
+      row.scrollIntoView?.({ block: "nearest" });
+    }
+  }
+  syncDuckHighlight();
 }
 
 function row(todo, index, archived = false) {
@@ -141,7 +187,9 @@ function row(todo, index, archived = false) {
   if (!archived) {
     li.tabIndex = -1;
   } else {
-    li.tabIndex = -1;
+    li.tabIndex = 0;
+    li.title = "Select to highlight its duck";
+    if (todo.id === picked) li.setAttribute("aria-current", "true");
   }
 
   const clip = document.createElement("div");
@@ -176,6 +224,68 @@ function row(todo, index, archived = false) {
   });
 
   inner.append(tick, text, trash);
+  if (!archived) {
+    const handle = document.createElement("button");
+    handle.type = "button";
+    handle.className = "drag-handle";
+    handle.draggable = true;
+    handle.disabled = pending.has(todo.id) || deleting.has(todo.id);
+    handle.setAttribute("aria-label", `Reorder ${todo.text}`);
+    handle.title = "Drag to reorder, or use Up and Down";
+    handle.innerHTML = '<svg viewBox="0 0 16 20" width="12" height="16" fill="currentColor" aria-hidden="true"><circle cx="5" cy="4" r="1.25"/><circle cx="11" cy="4" r="1.25"/><circle cx="5" cy="10" r="1.25"/><circle cx="11" cy="10" r="1.25"/><circle cx="5" cy="16" r="1.25"/><circle cx="11" cy="16" r="1.25"/></svg>';
+    handle.addEventListener("click", (event) => event.stopPropagation());
+    handle.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      focusIntent = null;
+      event.preventDefault();
+      event.stopPropagation();
+      const from = state.open.findIndex((item) => item.id === todo.id);
+      reorderOpen(from, from + (event.key === "ArrowUp" ? -1 : 1));
+      focusKey([...list.children].find((row) => row.dataset.id === todo.id)?.querySelector(".drag-handle"));
+    });
+    // Native HTML drag handles cover mouse input; pointer capture covers touch/pen.
+    let pointer = null;
+    let dropTarget = null;
+    let startY = 0;
+    let moved = false;
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.pointerType === "mouse" || handle.disabled || zenOn) return;
+      pointer = event.pointerId;
+      startY = event.clientY;
+      moved = false;
+      handle.setPointerCapture(event.pointerId);
+    });
+    handle.addEventListener("pointermove", (event) => {
+      if (pointer !== event.pointerId) return;
+      if (!moved && Math.abs(event.clientY - startY) < 6) return;
+      moved = true;
+      li.classList.add("dragging");
+      const scroller = todoBox.querySelector("main");
+      const bounds = scroller.getBoundingClientRect();
+      if (event.clientY < bounds.top + 28) scroller.scrollTop -= 16;
+      else if (event.clientY > bounds.bottom - 28) scroller.scrollTop += 16;
+      dropTarget = [...list.children].find((row) => {
+        const rect = row.getBoundingClientRect();
+        return event.clientY >= rect.top && event.clientY <= rect.bottom;
+      }) || null;
+      clearDropMarks();
+      if (dropTarget) markDrop(dropTarget, event.clientY);
+    });
+    const endPointer = (event) => {
+      if (pointer !== event.pointerId) return;
+      pointer = null;
+      li.classList.remove("dragging");
+      clearDropMarks();
+      if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+      if (event.type === "pointerup" && moved && dropTarget) {
+        dropOn(todo.id, dropTarget, event.clientY);
+      }
+      dropTarget = null;
+    };
+    handle.addEventListener("pointerup", endPointer);
+    handle.addEventListener("pointercancel", endPointer);
+    inner.prepend(handle);
+  }
   clip.append(inner);
   li.append(clip);
 
@@ -189,9 +299,8 @@ function row(todo, index, archived = false) {
       render();
       list.children[index]?.focus();
     });
-    li.draggable = true;
     li.addEventListener("dragstart", (e) => {
-      if (e.target.closest("button") || li.classList.contains("leaving")) {
+      if (!e.target.closest(".drag-handle") || pending.has(todo.id) || deleting.has(todo.id) || zenOn) {
         e.preventDefault();
         return;
       }
@@ -213,19 +322,12 @@ function row(todo, index, archived = false) {
       e.preventDefault();
       const id = e.dataTransfer.getData("text/plain");
       clearDropMarks();
-      const from = state.open.findIndex((item) => item.id === id);
-      if (from < 0) return;
-      const rect = li.getBoundingClientRect();
-      let to = index + (e.clientY > rect.top + rect.height / 2 ? 1 : 0);
-      if (from < to) to -= 1;
-      reorderOpen(from, to);
+      if (!list.querySelector(".dragging")) return;
+      dropOn(id, li, e.clientY);
     });
   } else {
-    li.addEventListener("click", () => {
-      picked = todo.id;
-      render();
-      archiveList.querySelector(".picked")?.focus();
-    });
+    li.addEventListener("click", () => selectQuacked(todo.id));
+    li.addEventListener("focus", () => selectQuacked(todo.id, false));
   }
   return li;
 }
@@ -234,6 +336,17 @@ function clearDropMarks() {
   list.querySelectorAll(".drop-before, .drop-after").forEach((node) => {
     node.classList.remove("drop-before", "drop-after");
   });
+}
+
+function dropOn(id, target, clientY) {
+  const from = state.open.findIndex((item) => item.id === id);
+  if (from < 0 || zenOn) return;
+  const index = [...list.children].indexOf(target);
+  if (index < 0) return;
+  const rect = target.getBoundingClientRect();
+  let to = index + (clientY > rect.top + rect.height / 2 ? 1 : 0);
+  if (from < to) to -= 1;
+  reorderOpen(from, to);
 }
 
 function markDrop(li, clientY) {
@@ -319,15 +432,37 @@ function completeTop() {
 
 function add(text) {
   if (archiveOpen) return;
-  const value = text.trim();
+  const value = text.trim().replace(/\p{L}/u, (letter) => letter.toLocaleUpperCase());
   if (!value) return;
-  state.open.unshift(item(value));
+  if (state.addPosition === "bottom") state.open.push(item(value));
+  else state.open.unshift(item(value));
+  state.history = taskHistory([value, ...state.history]);
+  state.taskSequence = taskSequence([...state.taskSequence, value]);
   archiveOpen = false;
   active = -1;
   draft.value = "";
   render();
   draft.focus();
+  updateSuggestions();
+  requestAnimationFrame(() => {
+    const scroller = todoBox.querySelector("main");
+    scroller.scrollTop = state.addPosition === "bottom" ? scroller.scrollHeight : 0;
+    markOverflow();
+  });
 }
+
+function syncAddPosition() {
+  const bottom = state.addPosition === "bottom";
+  addPosition.dataset.position = bottom ? "bottom" : "top";
+  addPosition.setAttribute("aria-pressed", String(bottom));
+  addPosition.title = bottom ? "Adding at bottom. Switch to top." : "Adding at top. Switch to bottom.";
+}
+
+addPosition.addEventListener("click", () => {
+  state.addPosition = state.addPosition === "bottom" ? "top" : "bottom";
+  syncAddPosition();
+  save();
+});
 
 let focusIntent = null;
 
@@ -419,8 +554,141 @@ composer.addEventListener("submit", (e) => {
   add(draft.value);
 });
 
+function closeSuggestions() {
+  clearPrediction();
+  suggestions.hidden = true;
+  suggestions.replaceChildren();
+  suggestionIndex = -1;
+  draft.setAttribute("aria-expanded", "false");
+  draft.removeAttribute("aria-activedescendant");
+}
+
+function clearPrediction() {
+  continuation = "";
+  prediction.hidden = true;
+  predictionPrefix.textContent = "";
+  predictionSuffix.textContent = "";
+  predictionHelp.textContent = "Tab accepts a predicted continuation when available.";
+}
+
+function predictionAllowed() {
+  return !archiveOpen && !composing && document.activeElement === draft &&
+    draft.selectionStart === draft.value.length && draft.selectionEnd === draft.value.length;
+}
+
+function displayPrediction(text) {
+  continuation = text;
+  if (!text) return;
+  predictionPrefix.textContent = draft.value;
+  predictionSuffix.textContent = text;
+  predictionContent.style.transform = `translateX(${-draft.scrollLeft}px)`;
+  prediction.hidden = false;
+  predictionHelp.textContent = `Tab adds: ${text}`;
+}
+
+function updatePrediction() {
+  clearPrediction();
+  if (!predictionAllowed()) return;
+  const historyKey = JSON.stringify([state.history, state.taskSequence]);
+  if (predictorHistory !== historyKey) {
+    predictor = createPredictor(state.history, state.taskSequence);
+    predictorHistory = historyKey;
+  }
+  displayPrediction(predictor.predict(draft.value));
+}
+
+function chooseSuggestion(text) {
+  focusIntent = null;
+  draft.value = text;
+  closeSuggestions();
+  draft.focus();
+  draft.setSelectionRange(text.length, text.length);
+}
+
+function updateSuggestions() {
+  closeSuggestions();
+  if (archiveOpen || document.activeElement !== draft) return;
+  updatePrediction();
+  const matches = suggestTasks(state.history, draft.value, state.taskSequence, state.open.map((todo) => todo.text));
+  if (!matches.length) return;
+  suggestions.replaceChildren(...matches.map((text, index) => {
+    const option = document.createElement("li");
+    option.id = `suggestion-${index}`;
+    option.setAttribute("role", "option");
+    option.setAttribute("aria-selected", "false");
+    option.textContent = text;
+    option.addEventListener("pointerdown", (event) => event.preventDefault());
+    option.addEventListener("click", () => chooseSuggestion(text));
+    return option;
+  }));
+  suggestions.hidden = false;
+  draft.setAttribute("aria-expanded", "true");
+}
+
+draft.addEventListener("input", (event) => {
+  focusIntent = null;
+  if (event.isComposing) closeSuggestions();
+  else updateSuggestions();
+});
+draft.addEventListener("compositionstart", () => { composing = true; closeSuggestions(); });
+draft.addEventListener("compositionend", () => { composing = false; updateSuggestions(); });
+draft.addEventListener("focus", updateSuggestions);
+draft.addEventListener("blur", closeSuggestions);
+draft.addEventListener("click", updatePrediction);
+draft.addEventListener("select", updatePrediction);
+draft.addEventListener("scroll", () => {
+  predictionContent.style.transform = `translateX(${-draft.scrollLeft}px)`;
+});
+draft.addEventListener("keyup", (event) => {
+  if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) updatePrediction();
+});
+
 draft.addEventListener("keydown", (e) => {
-  if (e.isComposing) return;
+  if (e.isComposing || composing) return;
+  if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const selected = !suggestions.hidden && suggestionIndex >= 0
+      ? suggestions.children[suggestionIndex].textContent : null;
+    if (selected || (continuation && draft.selectionStart === draft.value.length && draft.selectionEnd === draft.value.length)) {
+      e.preventDefault();
+      e.stopPropagation();
+      chooseSuggestion(selected || draft.value + continuation);
+      return;
+    }
+  }
+  if (e.key === "Escape" && continuation && suggestions.hidden) {
+    e.preventDefault();
+    e.stopPropagation();
+    clearPrediction();
+    return;
+  }
+  if (!suggestions.hidden) {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      focusIntent = null;
+      e.preventDefault();
+      e.stopPropagation();
+      const count = suggestions.children.length;
+      suggestionIndex = suggestionIndex < 0
+        ? (e.key === "ArrowDown" ? 0 : count - 1)
+        : (suggestionIndex + (e.key === "ArrowDown" ? 1 : -1) + count) % count;
+      [...suggestions.children].forEach((option, index) => {
+        option.setAttribute("aria-selected", String(index === suggestionIndex));
+      });
+      draft.setAttribute("aria-activedescendant", suggestions.children[suggestionIndex].id);
+      return;
+    }
+    if (e.key === "Enter" && suggestionIndex >= 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      chooseSuggestion(suggestions.children[suggestionIndex].textContent);
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSuggestions();
+      return;
+    }
+  }
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     add(draft.value);
@@ -443,11 +711,17 @@ draft.addEventListener("keydown", (e) => {
   }
 });
 
-enterAdd.addEventListener("keydown", (e) => {
+function navigateAddRow(e) {
+  if (e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
   if (e.key === "ArrowLeft") {
     e.preventDefault();
     e.stopPropagation();
-    focusDraftTyping();
+    if (e.currentTarget === addPosition) focusKey(enterAdd);
+    else focusDraftTyping();
+  } else if (e.key === "ArrowRight") {
+    e.preventDefault();
+    e.stopPropagation();
+    focusKey(addPosition);
   } else if (e.key === "ArrowUp") {
     e.preventDefault();
     e.stopPropagation();
@@ -462,7 +736,10 @@ enterAdd.addEventListener("keydown", (e) => {
       focusSoon(list.children[0]);
     }
   }
-});
+}
+
+enterAdd.addEventListener("keydown", navigateAddRow);
+addPosition.addEventListener("keydown", navigateAddRow);
 
 window.addEventListener("keyup", (e) => {
   if (e.key === "ArrowDown" || e.key === "ArrowUp") settleFocus();
@@ -505,7 +782,7 @@ function applyImport(raw) {
   const next = normalize(data);
   const recognizable = data && typeof data === "object" && ("open" in data || "done" in data || "ducks" in data || "theme" in data);
   if (!next || !recognizable) {
-    showError("That file is not a To-ducks export.");
+    showError("That file is not a to-duck export.");
     return false;
   }
   state = next;
@@ -606,6 +883,28 @@ document.addEventListener("keydown", (e) => {
   }
   const focused = document.activeElement;
   const inList = focused?.closest?.("#list");
+  if (archiveOpen && !focused?.closest?.(".menu")) {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const current = state.done.findIndex((todo) => todo.id === picked);
+      const next = current < 0
+        ? (e.key === "ArrowDown" ? 0 : state.done.length - 1)
+        : Math.max(0, Math.min(state.done.length - 1, current + (e.key === "ArrowDown" ? 1 : -1)));
+      if (state.done[next]) selectQuacked(state.done[next].id);
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      selectQuacked(null, false);
+      archiveToggle.focus();
+      return;
+    }
+    if ((e.key === "Enter" || e.key === " ") && focused?.matches?.("#archive-list .row")) {
+      e.preventDefault();
+      selectQuacked(focused.dataset.id);
+      return;
+    }
+  }
   if (zenOn && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
     e.preventDefault();
     if (e.key === "ArrowLeft") focusKey(zenTick);
@@ -614,8 +913,7 @@ document.addEventListener("keydown", (e) => {
   if (focused?.tagName === "BUTTON" && !inList && !focused.closest?.("#archive")) return;
   if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
     const host = focused?.closest?.(".row");
-    if (host && !host.classList.contains("active") && !host.classList.contains("picked")) return;
-    const row = host && (host.classList.contains("active") || host.classList.contains("picked"))
+    const row = host
       ? host
       : archiveOpen && picked
         ? archiveList.querySelector(".row.picked")
@@ -624,7 +922,16 @@ document.addEventListener("keydown", (e) => {
           : null;
     if (!row) return;
     e.preventDefault();
-    focusKey(e.key === "ArrowLeft" ? row.querySelector(".tick") : row.querySelector(".trash"));
+    if (!archiveOpen) {
+      active = state.open.findIndex((todo) => todo.id === row.dataset.id);
+      [...list.children].forEach((item) => item.classList.toggle("active", item === row));
+    }
+    const controls = archiveOpen
+      ? [row, row.querySelector(".trash")]
+      : [row.querySelector(".drag-handle"), row.querySelector(".tick"), row, row.querySelector(".trash")];
+    const index = Math.max(0, controls.indexOf(focused === row ? row : focused?.closest?.("button") || row));
+    const next = Math.max(0, Math.min(controls.length - 1, index + (e.key === "ArrowLeft" ? -1 : 1)));
+    focusKey(controls[next]);
     return;
   }
   if ((e.key === "Enter" || e.key === " ") && focused?.classList?.contains("trash")) {
@@ -742,6 +1049,8 @@ function emptyJar() {
 clearAllBtn.addEventListener("click", () => {
   state.open = [];
   state.done = [];
+  state.history = [];
+  state.taskSequence = [];
   active = -1;
   archiveOpen = false;
   emptyJar();
@@ -764,6 +1073,12 @@ clearArchiveBtn.addEventListener("click", () => {
   emptyJar();
   closeSettings();
   render();
+});
+
+rightDucksBtn.addEventListener("click", () => {
+  jar.right();
+  save();
+  closeSettings();
 });
 
 respawnBtn.addEventListener("click", () => {
@@ -795,7 +1110,7 @@ transferDownload.addEventListener("click", () => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "to-ducks.json";
+  link.download = "to-duck.json";
   link.click();
   URL.revokeObjectURL(url);
 });
@@ -837,7 +1152,7 @@ focusDraft();
 
 loadIndexedDB().then((remote) => {
   if (edits === 0 && remote && remote.savedAt > (state.savedAt || 0)) {
-    state = remote;
+    state = { ...remote, theme: state.theme };
     applyTheme();
     jar.setTheme(state.theme);
     jar.loadSpots(state.spots);

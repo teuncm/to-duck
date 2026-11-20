@@ -1,4 +1,4 @@
-# To-ducks
+# to-duck
 
 A minimalist task list that gives you a duck whenever you finish a task.
 The app runs in your browser; GitHub Pages serves the built files.
@@ -51,10 +51,35 @@ at `https://teuncm.nl/` and under a GitHub Pages repository path.
 
 ## Saved tasks
 
-Tasks, ducks, positions, and theme are saved on the current browser and
+Tasks, ducks, positions, task history, and theme are saved on the current browser and
 origin. They do not sync across devices. Before moving from localhost or
 another domain to `teuncm.nl`, use **Settings → Export**, then **Import** on
 the new domain to bring your collection with you.
+
+## Typing assistance
+
+Previously entered to-ducks are always suggested instantly and take priority over
+AI. Suggestions are ranked by recency, frequency, and familiar task sequences.
+The last two or three entered tasks distinguish similar routines; if no longer
+sequence matches, suggestions fall back to a single preceding task. For example,
+after repeating Wash → Dry → Fold, entering Wash again brings Dry forward. The last 256 submitted tasks are retained as
+local sequence history, including repetitions; distinct task history is capped
+at 200 names.
+
+For unfamiliar text, a tiny bundled English n-gram model offers instant inline
+continuations using up to three words of context. Saved task history and repeated
+tasks receive extra weight. Confident transitions can complete multiple words;
+uncertain predictions stop after a short continuation. Everything runs synchronously on the device, with no
+model downloads, workers, external runtime, accounts, or API calls.
+
+Previous-task suggestions tolerate small spelling mistakes, including swapped
+letters. Exact prefix matches remain first. Typo matches never silently rewrite
+the input or appear as inline corrections: select one explicitly to use it.
+
+Select a previous task with arrows and Enter, or click it. Tab accepts an inline
+continuation or the highlighted history suggestion; Enter adds the task. Escape
+dismisses assistance. Shift+Tab keeps normal navigation. Clear All clears both
+distinct history and repeated task sequences.
 
 GitHub references:
 [custom workflows](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages),

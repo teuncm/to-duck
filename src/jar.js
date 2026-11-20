@@ -1,30 +1,19 @@
-function hasGpu() {
-  try {
-    const probe = document.createElement("canvas");
-    const gl = probe.getContext("webgl2", { failIfMajorPerformanceCaveat: true })
-      || probe.getContext("webgl", { failIfMajorPerformanceCaveat: true });
-    if (!gl) return false;
-    gl.getExtension("WEBGL_lose_context")?.loseContext();
-    return true;
-  } catch {
-    return false;
-  }
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function svgElement(tag, attrs = {}) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+  return node;
 }
 
-function duckSprite() {
-  const size = 256;
-  const world = 64;
-  const sprite = document.createElement("canvas");
-  sprite.width = sprite.height = size;
-  const ctx = sprite.getContext("2d");
-  const unit = size / world;
-  ctx.setTransform(unit, 0, 0, unit, size / 2, size / 2);
-
+function createDuckArtwork(id) {
+  const artwork = svgElement("g", { id });
+  const path = (d, fill) => artwork.append(svgElement("path", { d, fill }));
   const ellipse = (x, y, rx, ry, rot, color) => {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2);
-    ctx.fill();
+    artwork.append(svgElement("ellipse", {
+      cx: x, cy: y, rx, ry, fill: color,
+      transform: `rotate(${rot * 180 / Math.PI} ${x} ${y})`,
+    }));
   };
 
   ellipse(-1, 5, 17, 12, 0, "#f0c43a");
@@ -36,12 +25,7 @@ function duckSprite() {
   ellipse(-18, 3, 5, 3.2, -0.8, "#e2ae2c");
   ellipse(-20, 1, 3.4, 2.2, -0.4, "#f3c94a");
   ellipse(-16, 5.5, 3, 2, 0.5, "#f6d35a");
-  ctx.fillStyle = "#f6d35a";
-  ctx.beginPath();
-  ctx.moveTo(-16, 4);
-  ctx.quadraticCurveTo(-22, 1, -15, -2);
-  ctx.quadraticCurveTo(-12, 2, -14, 6);
-  ctx.fill();
+  path("M-16 4 Q-22 1 -15 -2 Q-12 2 -14 6", "#f6d35a");
 
   ellipse(-6, 2, 7, 4.5, -0.6, "#f3c94a");
   ellipse(-7, 1.2, 5, 3, -0.7, "#ffe7a0");
@@ -53,33 +37,15 @@ function duckSprite() {
   ellipse(8, -6, 4, 2.2, 0.6, "#e7b428");
   ellipse(5, -7, 2.2, 1.4, 0.2, "#f3a3a0");
 
-  ctx.fillStyle = "#ef8a22";
-  ctx.beginPath();
-  ctx.moveTo(15, -10);
-  ctx.quadraticCurveTo(25, -8, 24, -5);
-  ctx.quadraticCurveTo(23, -2, 15, -4);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = "#ffb15a";
-  ctx.beginPath();
-  ctx.moveTo(16, -9);
-  ctx.quadraticCurveTo(22, -8, 22, -6.2);
-  ctx.quadraticCurveTo(20, -5.4, 16, -6);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = "#d56d12";
-  ctx.beginPath();
-  ctx.moveTo(15, -6.2);
-  ctx.lineTo(22, -5);
-  ctx.lineTo(15, -4);
-  ctx.fill();
+  path("M15 -10 Q25 -8 24 -5 Q23 -2 15 -4 Z", "#ef8a22");
+  path("M16 -9 Q22 -8 22 -6.2 Q20 -5.4 16 -6 Z", "#ffb15a");
+  path("M15 -6.2 L22 -5 L15 -4", "#d56d12");
   ellipse(19, -7.4, 0.7, 0.45, 0.4, "#a34e0c");
 
   ellipse(12, -10, 2.5, 2.5, 0, "#fff");
   ellipse(12.2, -10, 1.7, 1.7, 0, "#1c1c1c");
   ellipse(12.7, -10.6, 0.55, 0.55, 0, "#fff");
-
-  return sprite;
+  return artwork;
 }
 const PAD = 2;
 const PARTS = [
@@ -91,17 +57,28 @@ const PARTS = [
 ];
 
 export function createJar(host) {
-  const canvas = document.createElement("canvas");
-  const gpu = hasGpu();
-  const ctx = canvas.getContext("2d", { alpha: true, desynchronized: gpu })
-    || canvas.getContext("2d", { alpha: true });
-  const sprite = duckSprite();
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  host.appendChild(canvas);
+  const svg = svgElement("svg", {
+    width: "100%", height: "100%", preserveAspectRatio: "xMidYMid meet",
+    "aria-hidden": "true", focusable: "false",
+  });
+  const artId = `duck-${crypto.randomUUID()}`;
+  const defs = svgElement("defs");
+  defs.append(createDuckArtwork(artId));
+  const flockLayer = svgElement("g", { class: "duck-flock" });
+  const highlighted = svgElement("g", { class: "duck-highlight", visibility: "hidden" });
+  const halo = svgElement("ellipse", {
+    cx: 0, cy: 0, rx: 29, ry: 25, fill: "#f6cf55", "fill-opacity": 0.18,
+    "stroke-width": 2, "vector-effect": "non-scaling-stroke",
+  });
+  highlighted.append(halo, svgElement("use", { href: `#${artId}` }));
+  svg.append(defs, flockLayer, highlighted);
+  host.append(svg);
 
   const ducks = [];
+  let highlightedSlot = null;
+  let highlightColor = "#fff2b3";
   let raf = 0;
+  let motion = null;
   const cam = { x: -120, y: -90, w: 240, h: 180 };
   const camTo = { ...cam };
 
@@ -195,7 +172,7 @@ export function createJar(host) {
     let maxY = -Infinity;
     for (let slot = 0; slot <= maxSlot; slot++) {
       const spot = spotFor(slot);
-      // Fit the full sprite at any rotation without adding camera padding.
+      // Fit the full duck at any rotation without adding camera padding.
       minX = Math.min(minX, spot.x - 32);
       maxX = Math.max(maxX, spot.x + 32);
       minY = Math.min(minY, spot.y - 32);
@@ -210,16 +187,24 @@ export function createJar(host) {
   }
 
   function sync(slots, animate) {
+    motion = null;
     const wanted = new Set(slots);
+    if (!wanted.has(highlightedSlot)) highlightedSlot = null;
     for (let i = ducks.length - 1; i >= 0; i--) {
-      if (!wanted.has(ducks[i].slot)) ducks.splice(i, 1);
+      if (!wanted.has(ducks[i].slot)) {
+        ducks[i].node.remove();
+        ducks.splice(i, 1);
+      }
     }
     const have = new Set(ducks.map((duck) => duck.slot));
     for (const slot of slots) {
       if (have.has(slot)) continue;
       const spot = spotFor(slot);
+      const node = svgElement("g", { class: "duck", "data-slot": slot });
+      node.append(svgElement("use", { href: `#${artId}` }));
+      flockLayer.append(node);
       ducks.push({
-        slot,
+        slot, node,
         x: spot.x,
         y: spot.y - 30,
         angle: spot.angle,
@@ -263,46 +248,71 @@ export function createJar(host) {
   }
 
   function draw() {
-    const width = canvas.width;
-    const height = canvas.height;
-    if (!width || !height) return;
-    const scale = Math.min(width / cam.w, height / cam.h);
-    const originX = (width - cam.w * scale) / 2 - cam.x * scale;
-    const originY = (height - cam.h * scale) / 2 - cam.y * scale;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, width, height);
-    const half = 32;
+    svg.setAttribute("viewBox", `${cam.x} ${cam.y} ${cam.w} ${cam.h}`);
     for (const duck of ducks) {
-      const cos = Math.cos(duck.angle);
-      const sin = Math.sin(duck.angle);
-      ctx.setTransform(scale * cos, scale * sin, -scale * sin, scale * cos, originX + duck.x * scale, originY + duck.y * scale);
-      ctx.drawImage(sprite, -half, -half, half * 2, half * 2);
+      duck.node.setAttribute("transform", `translate(${duck.x} ${duck.y}) rotate(${duck.angle * 180 / Math.PI})`);
     }
+    const selected = ducks.find((duck) => duck.slot === highlightedSlot);
+    highlighted.setAttribute("visibility", selected ? "visible" : "hidden");
+    if (selected) {
+      highlighted.dataset.slot = String(selected.slot);
+      highlighted.setAttribute("transform", selected.node.getAttribute("transform"));
+      halo.setAttribute("stroke", highlightColor);
+    } else delete highlighted.dataset.slot;
   }
 
-  function tick() {
-    ease();
+  function startMotion(duration) {
+    const settle = () => {
+      Object.assign(cam, camTo);
+      for (const duck of ducks) {
+        duck.x = duck.tx;
+        duck.y = duck.ty;
+        duck.angle = duck.ta;
+      }
+    };
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      motion = null;
+      settle();
+      draw();
+      return;
+    }
+    motion = {
+      start: performance.now(), duration, camera: { ...cam },
+      ducks: ducks.map((duck) => ({
+        duck, x: duck.x, y: duck.y, angle: duck.angle,
+        // Turn along the shortest arc, including when an earlier motion is interrupted.
+        turn: Math.atan2(Math.sin(duck.ta - duck.angle), Math.cos(duck.ta - duck.angle)),
+      })),
+      settle,
+    };
+    kick();
+  }
+
+  function tick(now) {
+    if (motion) {
+      const progress = Math.max(0, Math.min(1, (now - motion.start) / motion.duration));
+      const eased = progress * progress * (3 - 2 * progress);
+      const blend = (from, to) => from + (to - from) * eased;
+      for (const key of ["x", "y", "w", "h"]) cam[key] = blend(motion.camera[key], camTo[key]);
+      for (const start of motion.ducks) {
+        start.duck.x = blend(start.x, start.duck.tx);
+        start.duck.y = blend(start.y, start.duck.ty);
+        start.duck.angle = start.angle + start.turn * eased;
+      }
+      if (progress === 1) {
+        motion.settle();
+        motion = null;
+      }
+    } else ease();
     draw();
-    raf = moving() ? requestAnimationFrame(tick) : 0;
+    raf = motion || moving() ? requestAnimationFrame(tick) : 0;
   }
 
   function kick() {
     if (!raf) raf = requestAnimationFrame(tick);
   }
 
-  function resize() {
-    const ratio = Math.min(devicePixelRatio || 1, 2);
-    const w = host.clientWidth || 1;
-    const h = host.clientHeight || 1;
-    canvas.width = Math.max(1, Math.floor(w * ratio));
-    canvas.height = Math.max(1, Math.floor(h * ratio));
-    canvas.style.width = `${w}px`;
-    canvas.style.height = `${h}px`;
-    draw();
-  }
-
-  new ResizeObserver(resize).observe(host);
-  resize();
+  draw();
 
   return {
     loadSpots(list) {
@@ -330,17 +340,39 @@ export function createJar(host) {
     },
     reset() {
       ducks.length = 0;
+      flockLayer.replaceChildren();
       spots.length = 0;
       seed = Math.random() * 1000;
       sync([], false);
     },
-    setTheme() {},
+    setHighlight(slot) {
+      const next = ducks.some((duck) => duck.slot === slot) ? slot : null;
+      if (next === highlightedSlot) return;
+      highlightedSlot = next;
+      draw();
+    },
+    setTheme(theme) {
+      highlightColor = theme === "light" ? "#805d00" : "#fff2b3";
+      draw();
+    },
+    right() {
+      if (!ducks.length) return;
+      for (const duck of ducks) {
+        // Freeze the visible position, even if a reflow or arrival is in progress.
+        spots[duck.slot] = { x: duck.x, y: duck.y, angle: 0 };
+        duck.tx = duck.x;
+        duck.ty = duck.y;
+        duck.ta = 0;
+      }
+      Object.assign(camTo, cam);
+      startMotion(1200);
+    },
     respawn() {
       if (!ducks.length) return;
       seed = Math.random() * 1000;
       spots.length = 0;
       place();
-      kick();
+      startMotion(1600);
     },
   };
 }
